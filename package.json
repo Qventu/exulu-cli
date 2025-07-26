@@ -1,0 +1,19 @@
+{
+  "name": "@exulu/cli",
+  "version": "1.0.0",
+  "description": "Exulu CLI tool for managing Claude Code",
+  "main": "index.js",
+  "bin": {
+    "exulu": "./index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": ["cli", "claude", "exulu"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "inquirer": "^8.2.6",
+    "chalk": "^4.1.2"
+  }
+}
