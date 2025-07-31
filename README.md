@@ -1,6 +1,6 @@
 # Exulu CLI
 
-A CLI tool for managing Claude Code in the Exulu development environment.
+A CLI tool for the Exulu Intelligence Management Platform.
 
 ## Installation
 
@@ -19,7 +19,6 @@ exulu
 ### Features
 
 - **Start Claude Code**: Automatically installs Claude Code if not present, configures settings, and launches the tool
-- **Update Claude Code Hooks**: Manage Claude Code hooks (coming soon)
 
 ### What it does
 

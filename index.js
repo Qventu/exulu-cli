@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { spawn, execSync } = require('child_process');
+const { execSync } = require('child_process');
 const inquirer = require('inquirer');
 const chalk = require('chalk');
 const https = require('https');
@@ -15,7 +15,21 @@ class ExuluCLI {
 
     async run() {
         console.log(chalk.blue.bold('🚀 Exulu CLI'));
-        console.log(chalk.gray('Welcome to the Exulu development environment\n'));
+        console.log(chalk.gray(`
+            ███████╗██╗  ██╗██╗   ██╗██╗      ██╗   ██╗
+            ██╔════╝╚██╗██╔╝██║   ██║██║      ██║   ██║
+            █████╗   ╚███╔╝ ██║   ██║██║      ██║   ██║
+            ██╔══╝   ██╔██╗ ██║   ██║██║      ██║   ██║
+            ███████╗██╔╝ ██╗╚██████╔╝███████╗╚██████╔╝
+            ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ 
+            Intelligence Management Platform
+        
+            `));
+        console.log(chalk.gray('Welcome 🤘 \n'));
+
+
+        // Validate or create settings.json
+        const settings = await this.validateSettings();
 
         const { action } = await inquirer.prompt([
             {
@@ -23,8 +37,9 @@ class ExuluCLI {
                 name: 'action',
                 message: 'What would you like to do?',
                 choices: [
-                    { name: '🤖 Start Claude Code!!', value: 'start-claude' },
-                    { name: '🔧 Update Claude Code Hooks', value: 'update-hooks' }
+                    { name: '🤖 Start Claude Code', value: 'start-claude' },
+                    { name: '🔧 List agents', value: 'list-agents' },
+                    { name: '🔧 List contexts', value: 'list-contexts' },
                 ]
             }
         ]);
@@ -33,8 +48,17 @@ class ExuluCLI {
             case 'start-claude':
                 await this.startClaude();
                 break;
-            case 'update-hooks':
-                await this.updateHooks();
+            case 'list-agents':
+                await this.listAgents({
+                    backend: settings.backend,
+                    token: settings.token
+                });
+                break;
+            case 'list-contexts':
+                await this.listContexts({
+                    backend: settings.backend,
+                    token: settings.token
+                });
                 break;
         }
     }
@@ -47,9 +71,6 @@ class ExuluCLI {
             console.log(chalk.red('Claude Code not found. Installing...'));
             await this.installClaude();
         }
-
-        // Validate or create settings.json
-        await this.validateClaudeSettings();
 
         // Start Claude Code
         console.log(chalk.green('✅ Setup complete! Starting Claude Code...\n'));
@@ -76,16 +97,16 @@ class ExuluCLI {
         }
     }
 
-    async validateClaudeSettings() {
+    async validateSettings() {
         const claudeDir = path.dirname(this.claudeSettingsPath);
-        
+
         // Create .claude directory if it doesn't exist
         if (!fs.existsSync(claudeDir)) {
             fs.mkdirSync(claudeDir, { recursive: true });
         }
 
         let settings = {};
-        
+
         // Load existing settings if they exist
         if (fs.existsSync(this.claudeSettingsPath)) {
             try {
@@ -96,37 +117,49 @@ class ExuluCLI {
             }
         }
 
-        // Validate and set environment configuration
-        if (!settings.env || !settings.env.ANTHROPIC_BASE_URL) {
+        // Validate API key
+        if (
+            !settings.env ||
+            !settings.env.ANTHROPIC_BASE_URL ||
+            !settings.apiKeyHelper ||
+            settings.apiKeyHelper === 'echo PLACEHOLDER' ||
+            settings.apiKeyHelper.trim() === ''
+        ) {
             const { baseUrl } = await inquirer.prompt([
                 {
                     type: 'input',
                     name: 'baseUrl',
-                    message: 'Enter your ANTHROPIC_BASE_URL:',
-                    default: 'http://localhost:9001/gateway/anthropic'
+                    message: 'Enter your Exulu IMP base url:',
+                    default: 'https://<your_domain>'
                 }
             ]);
 
+            const response = await fetch(`${baseUrl}/api/config`);
+            const data = await response.json();
+
+            if (!data.backend) {
+                console.log(chalk.red('❌ Failed to get backend url from the application, are you sure you provided the correct url?'));
+                process.exit(1);
+            }
+
             settings.env = {
-                ANTHROPIC_BASE_URL: baseUrl,
+                ANTHROPIC_BASE_URL: data.backend + "/gateway/anthropic",
                 DISABLE_AUTOUPDATER: 1
             };
-        }
 
-        // Validate API key
-        if (!settings.apiKeyHelper || settings.apiKeyHelper === 'echo PLACEHOLDER' || settings.apiKeyHelper.trim() === '') {
-            await this.setupApiKey(settings);
+            await this.setupApiKey(baseUrl + "/token", settings);
+
         } else {
             // Check if existing API key is still valid
             const existingApiKey = settings.apiKeyHelper.replace('echo ', '').trim();
             const baseUrl = settings.env.ANTHROPIC_BASE_URL.replace('/gateway/anthropic', '');
-            
+
             console.log(chalk.yellow('🔐 Validating existing token...'));
             const isValid = await this.validateApiKey(baseUrl, existingApiKey);
-            
+
             if (!isValid) {
                 console.log(chalk.red('❌ Existing API key is invalid or expired'));
-                await this.setupApiKey(settings);
+                await this.setupApiKey(baseUrl + "/token", settings);
             } else {
                 console.log(chalk.green('✅ API key is valid'));
             }
@@ -134,17 +167,18 @@ class ExuluCLI {
 
         // Save settings
         fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
-        console.log(chalk.green('✅ Claude settings configured\n'));
+        console.log(chalk.green('✅ Settings configured\n'));
+        return {
+            backend: settings.env.ANTHROPIC_BASE_URL.replace('/gateway/anthropic', ''),
+            token: settings.apiKeyHelper.replace('echo ', '').trim()
+        };
     }
 
-    async setupApiKey(settings) {
-        const baseUrl = settings.env.ANTHROPIC_BASE_URL.replace('/gateway/anthropic', '');
-        const authUrl = `${baseUrl}/token`;
-
+    async setupApiKey(tokenUrl, settings) {
         console.log(chalk.yellow('🔐 API Key setup required'));
         console.log(chalk.bgBlue.white.bold('\n=== Access token setup ==='));
         console.log(chalk.blueBright.bold('👉 Please open the following URL in your browser to authenticate:'));
-        console.log(chalk.bgWhite.black(`\n  ${authUrl}\n`));
+        console.log(chalk.bgWhite.black(`\n  ${tokenUrl}\n`));
         console.log(chalk.gray('Authenticate and copy your access token\n'));
 
         const { apiKey } = await inquirer.prompt([
@@ -168,7 +202,7 @@ class ExuluCLI {
         return new Promise((resolve) => {
             const url = new URL(`${baseUrl}/ping`);
             const client = url.protocol === 'https:' ? https : http;
-            
+
             const options = {
                 hostname: url.hostname,
                 port: url.port,
@@ -208,10 +242,50 @@ class ExuluCLI {
         }
     }
 
-    async updateHooks() {
-        console.log(chalk.blue('🔧 Update Claude Code Hooks'));
-        console.log(chalk.gray('This feature is coming soon!\n'));
-        
+    async listContexts({ backend, token }) {
+        const response = await fetch(`${backend}/contexts`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await response.json();
+        console.log(chalk.blue('✅ Contexts:'));
+        console.table(data.map(context => ({
+            id: context.id?.slice(0, 8) + '...',
+            name: context.name,
+            description: context.description?.slice(0, 40) + '...',
+        })));
+        console.log(chalk.gray('Total contexts: ' + data.length));
+
+        const { goBack } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'goBack',
+                message: 'Go back to main menu?',
+                default: true
+            }
+        ]);
+
+        if (goBack) {
+            await this.run();
+        }
+    }
+
+    async listAgents({ backend, token }) {
+        const response = await fetch(`${backend}/agents`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        const data = await response.json();
+        console.log(chalk.blue('✅ Agents:'));
+        console.table(data.map(agent => ({
+            id: agent.id?.slice(0, 8) + '...',
+            name: agent.name,
+            description: agent.description?.slice(0, 40) + '...',
+        })));
+        console.log(chalk.gray('Total agents: ' + data.length));
+
         const { goBack } = await inquirer.prompt([
             {
                 type: 'confirm',
