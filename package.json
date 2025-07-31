@@ -1,8 +1,21 @@
 {
   "name": "@exulu/cli",
+  "author": "Qventu Bv.",
   "version": "1.0.0",
-  "description": "Exulu CLI tool for managing Claude Code",
   "main": "index.js",
+  "private": false,
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "20.10.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Qventu/exulu-cli"
+  },
+  "homepage": "https://exulu.com",
+  "description": "Exulu IMP CLI tool.",
   "bin": {
     "exulu": "./index.js"
   },
@@ -12,7 +25,6 @@
   },
   "keywords": [
     "cli",
-    "claude",
     "exulu"
   ],
   "author": "",
