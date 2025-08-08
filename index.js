@@ -15,17 +15,21 @@ class ExuluCLI {
 
     async run() {
         console.log(chalk.blue.bold('🚀 Exulu CLI'));
-        console.log(chalk.gray(`
-            ███████╗██╗  ██╗██╗   ██╗██╗      ██╗   ██╗
-            ██╔════╝╚██╗██╔╝██║   ██║██║      ██║   ██║
-            █████╗   ╚███╔╝ ██║   ██║██║      ██║   ██║
-            ██╔══╝   ██╔██╗ ██║   ██║██║      ██║   ██║
-            ███████╗██╔╝ ██╗╚██████╔╝███████╗╚██████╔╝
-            ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ 
-            Intelligence Management Platform
-        
-            `));
-        console.log(chalk.gray('Welcome 🤘 \n'));
+        console.log(chalk.cyanBright(`
+███████╗██╗  ██╗██╗   ██╗██╗      ██╗   ██╗
+██╔════╝╚██╗██╔╝██║   ██║██║      ██║   ██║
+█████╗   ╚███╔╝ ██║   ██║██║      ██║   ██║
+██╔══╝   ██╔██╗ ██║   ██║██║      ██║   ██║
+███████╗██╔╝ ██╗╚██████╔╝███████╗╚██████╔╝
+╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ 
+Intelligence Management Platform`));
+        console.log(chalk.cyan('\n┌─────────────────────────────────────────────────────────────────────────────┐'));
+        console.log(chalk.cyan('│') + chalk.bgCyan.black.bold(' 💡 PRO TIP OF THE DAY: ') + chalk.cyan('                                                     │'));
+        console.log(chalk.cyan('├─────────────────────────────────────────────────────────────────────────────┤'));
+        console.log(chalk.cyan('│ ') + chalk.cyan.bold('Did you know that on Mac, you can enable "Dictation" in System Settings') + chalk.cyan('     │'));
+        console.log(chalk.cyan('│ ') + chalk.cyan('and map it to a shortcut. This allows you to speak to Claude directly') + chalk.cyan('       │'));
+        console.log(chalk.cyan('│ ') + chalk.cyan('in the terminal!') + chalk.cyan('                                                            │'));
+        console.log(chalk.cyan('└─────────────────────────────────────────────────────────────────────────────┘\n'));
 
 
         // Validate or create settings.json
@@ -40,6 +44,7 @@ class ExuluCLI {
                     { name: '🤖 Start Claude Code', value: 'start-claude' },
                     { name: '🔧 List agents', value: 'list-agents' },
                     { name: '🔧 List contexts', value: 'list-contexts' },
+                    { name: '⚙️ Change settings', value: 'change-settings' },
                 ]
             }
         ]);
@@ -60,11 +65,16 @@ class ExuluCLI {
                     token: settings.token
                 });
                 break;
+            case 'change-settings':
+                await this.changeSettings();
+                break;
         }
     }
 
     async startClaude() {
         console.log(chalk.yellow('Starting Claude Code setup...\n'));
+
+        await this.selectClaudeCodeIMPAgent();
 
         // Check if Claude Code is installed
         if (!this.isClaudeInstalled()) {
@@ -95,6 +105,71 @@ class ExuluCLI {
             console.error(chalk.red('❌ Failed to install Claude Code:'), error.message);
             process.exit(1);
         }
+    }
+
+    async selectClaudeCodeIMPAgent() {
+        const claudeDir = path.dirname(this.claudeSettingsPath);
+
+        // Create .claude directory if it doesn't exist
+        if (!fs.existsSync(claudeDir)) {
+            fs.mkdirSync(claudeDir, { recursive: true });
+        }
+
+        let settings = {};
+
+        // Load existing settings if they exist
+        if (fs.existsSync(this.claudeSettingsPath)) {
+            try {
+                settings = JSON.parse(fs.readFileSync(this.claudeSettingsPath, 'utf8'));
+            } catch (error) {
+                console.log(chalk.red('❌  Invalid settings.json found, please restart the CLI\n'));
+                process.exit(1);
+            }
+        }
+
+        const token = settings.apiKeyHelper.replace('echo ', '').trim();
+        const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
+        const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
+
+        const response = await fetch(`${baseUrl}/agents`, {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+        if (response.status !== 200) {
+            console.log(chalk.red('❌  Failed to get agents, please check your API key or try restarting the CLI\n'));
+            process.exit(1);
+        }
+
+        const data = await response.json();
+
+        const agents = data.filter(agent => agent.type === 'custom');
+
+        console.log(chalk.blue('✅ Agents:'));
+        console.table(agents.map(agent => ({
+            id: agent.id?.slice(0, 8) + '...',
+            name: agent.name,
+            description: agent.description?.slice(0, 40) + '...',
+        })));
+        console.log(chalk.gray('Total agents: ' + agents.length));
+
+        const { agent } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'agent',
+                message: 'Select an agent:',
+                choices: agents.map(agent => ({
+                    name: agent.name,
+                    value: agent.id
+                }))
+            }
+        ]);
+
+        settings.env.ANTHROPIC_BASE_URL = `${baseUrl}/gateway/anthropic/${agent}`;
+        fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
+
+        console.log(chalk.green(`✅ Agent ${agent} selected\n`));
+        return agent;
     }
 
     async validateSettings() {
@@ -152,7 +227,9 @@ class ExuluCLI {
         } else {
             // Check if existing API key is still valid
             const existingApiKey = settings.apiKeyHelper.replace('echo ', '').trim();
-            const baseUrl = settings.env.ANTHROPIC_BASE_URL.replace('/gateway/anthropic', '');
+            // Always extract the protocol and host (TLD), removing any path/query/fragment
+            const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
+            const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
 
             console.log(chalk.yellow('🔐 Validating existing token...'));
             const isValid = await this.validateApiKey(baseUrl, existingApiKey);
@@ -166,10 +243,13 @@ class ExuluCLI {
         }
 
         // Save settings
+
+        const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
+        const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
         fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
         console.log(chalk.green('✅ Settings configured\n'));
         return {
-            backend: settings.env.ANTHROPIC_BASE_URL.replace('/gateway/anthropic', ''),
+            backend: baseUrl,
             token: settings.apiKeyHelper.replace('echo ', '').trim()
         };
     }
@@ -231,10 +311,39 @@ class ExuluCLI {
         });
     }
 
+    isDockerInstalled() {
+        try {
+            execSync('docker --version', { stdio: 'ignore' });
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    cleanup() {
+        // Stop any ongoing recording
+        if (this.currentMic) {
+            this.currentMic.stop();
+        }
+
+        // Clear recording timer
+        if (this.recordingTimer) {
+            clearInterval(this.recordingTimer);
+        }
+
+        // Terminate Claude process if it exists (for backward compatibility)
+        if (this.claudeProcess && !this.claudeProcess.killed) {
+            try {
+                this.claudeProcess.kill();
+            } catch (error) {
+                // Ignore cleanup errors
+            }
+        }
+    }
+
     launchClaude() {
         try {
             // Replace current process with Claude Code
-            const { execSync } = require('child_process');
             execSync('claude', { stdio: 'inherit' });
         } catch (error) {
             console.error(chalk.red('❌ Failed to start Claude Code:'), error.message);
@@ -271,6 +380,23 @@ class ExuluCLI {
         }
     }
 
+    async changeSettings() {
+        console.log(chalk.yellow('🔄 Changing settings...\n'));
+        
+        // Delete existing settings file to force recreation
+        if (fs.existsSync(this.claudeSettingsPath)) {
+            fs.unlinkSync(this.claudeSettingsPath);
+        }
+        
+        // Re-run the settings validation which will prompt for new values
+        await this.validateSettings();
+        
+        console.log(chalk.green('✅ Settings updated successfully!\n'));
+        
+        // Go back to main menu
+        await this.run();
+    }
+
     async listAgents({ backend, token }) {
         const response = await fetch(`${backend}/agents`, {
             headers: {
@@ -303,6 +429,7 @@ class ExuluCLI {
 
 // Run the CLI
 if (require.main === module) {
+    // Default CLI behavior
     const cli = new ExuluCLI();
     cli.run().catch(error => {
         console.error(chalk.red('❌ An error occurred:'), error.message);
