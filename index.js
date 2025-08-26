@@ -41,10 +41,11 @@ Intelligence Management Platform`));
                 name: 'action',
                 message: 'What would you like to do?',
                 choices: [
-                    { name: '🤖 Start Claude Code', value: 'start-claude' },
-                    { name: '🔧 List agents', value: 'list-agents' },
-                    { name: '🔧 List contexts', value: 'list-contexts' },
-                    { name: '⚙️ Change settings', value: 'change-settings' },
+                    { name: '> Start Claude Code', value: 'start-claude' },
+                    { name: '> Setup Agent OS', value: 'setup-agent-os' },
+                    { name: '> List agents', value: 'list-agents' },
+                    { name: '> List contexts', value: 'list-contexts' },
+                    { name: '> Change settings', value: 'change-settings' },
                 ]
             }
         ]);
@@ -52,6 +53,9 @@ Intelligence Management Platform`));
         switch (action) {
             case 'start-claude':
                 await this.startClaude();
+                break;
+            case 'setup-agent-os':
+                await this.setupAgentOS();
                 break;
             case 'list-agents':
                 await this.listAgents({
@@ -81,6 +85,9 @@ Intelligence Management Platform`));
             console.log(chalk.red('Claude Code not found. Installing...'));
             await this.installClaude();
         }
+
+        // Show MCP server selection
+        await this.selectMCPServers();
 
         // Start Claude Code
         console.log(chalk.green('✅ Setup complete! Starting Claude Code...\n'));
@@ -230,8 +237,6 @@ Intelligence Management Platform`));
             // Always extract the protocol and host (TLD), removing any path/query/fragment
             const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
             const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
-
-            console.log(chalk.yellow('🔐 Validating existing token...'));
             const isValid = await this.validateApiKey(baseUrl, existingApiKey);
 
             if (!isValid) {
@@ -247,7 +252,11 @@ Intelligence Management Platform`));
         const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
         const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
         fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
-        console.log(chalk.green('✅ Settings configured\n'));
+        console.log(chalk.green('✅ Settings are configured'));
+
+        // Ask about adding .claude/settings.json to .gitignore
+        await this.manageGitignore();
+
         return {
             backend: baseUrl,
             token: settings.apiKeyHelper.replace('echo ', '').trim()
@@ -276,6 +285,99 @@ Intelligence Management Platform`));
         }
 
         settings.apiKeyHelper = `echo ${apiKey.trim()}`;
+    }
+
+    async manageGitignore() {
+        const gitignorePath = path.join(process.cwd(), '.gitignore');
+        const claudeSettingsEntry = '.claude/settings.json';
+        const claudeDirEntry = '.claude';
+
+        // Check if .gitignore exists and analyze its content
+        let gitignoreContent = '';
+        let hasClaudeSettingsJson = false;
+        let hasClaudeDir = false;
+
+        if (fs.existsSync(gitignorePath)) {
+            gitignoreContent = fs.readFileSync(gitignorePath, 'utf8');
+            const lines = gitignoreContent.split('\n').map(line => line.trim());
+            
+            hasClaudeSettingsJson = lines.includes(claudeSettingsEntry);
+            hasClaudeDir = lines.includes(claudeDirEntry);
+        }
+
+        // If .claude/settings.json is already there, we're good
+        if (hasClaudeSettingsJson) {
+            console.log(chalk.green('✅ .claude/settings.json is already in .gitignore \n'));
+            return;
+        }
+
+        // If .claude directory is ignored, suggest changing to specific file
+        if (hasClaudeDir) {
+            console.log(chalk.yellow('⚠️  Found ".claude" in .gitignore'));
+            console.log(chalk.gray('This ignores the entire .claude directory, including hooks, commands, and agents.'));
+            console.log(chalk.gray('We recommend changing this to ".claude/settings.json" to only ignore sensitive settings.\n'));
+
+            const { replaceEntry } = await inquirer.prompt([
+                {
+                    type: 'confirm',
+                    name: 'replaceEntry',
+                    message: 'Would you like to replace ".claude" with ".claude/settings.json" in .gitignore?',
+                    default: true
+                }
+            ]);
+
+            if (replaceEntry) {
+                try {
+                    // Replace .claude with .claude/settings.json
+                    const updatedContent = gitignoreContent.replace(
+                        new RegExp(`^${claudeDirEntry}$`, 'm'),
+                        claudeSettingsEntry
+                    );
+                    
+                    fs.writeFileSync(gitignorePath, updatedContent);
+                    console.log(chalk.green('✅ Updated .gitignore: replaced ".claude" with ".claude/settings.json"'));
+                    
+                } catch (error) {
+                    console.log(chalk.red('❌ Failed to update .gitignore:'), error.message);
+                    console.log(chalk.yellow('You may want to manually change ".claude" to ".claude/settings.json" in your .gitignore file'));
+                }
+            } else {
+                console.log(chalk.yellow('⚠️  Keeping existing ".claude" entry in .gitignore'));
+                console.log(chalk.gray('Note: This will prevent committing hooks, commands, and agents from the .claude directory'));
+            }
+            return;
+        }
+
+        // If neither entry exists, ask to add .claude/settings.json
+        const { addToGitignore } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'addToGitignore',
+                message: 'Would you like to add .claude/settings.json to .gitignore to keep your API key private?',
+                default: true
+            }
+        ]);
+
+        if (!addToGitignore) {
+            console.log(chalk.yellow('⚠️  Remember to keep your .claude/settings.json file private'));
+            return;
+        }
+
+        try {
+            // Add entry to .gitignore
+            const entryToAdd = gitignoreContent.endsWith('\n') || gitignoreContent === '' 
+                ? claudeSettingsEntry + '\n'
+                : '\n' + claudeSettingsEntry + '\n';
+
+            fs.appendFileSync(gitignorePath, entryToAdd);
+            
+            const action = fs.existsSync(gitignorePath) && gitignoreContent ? 'updated' : 'created';
+            console.log(chalk.green(`✅ .gitignore ${action} with .claude/settings.json entry`));
+            
+        } catch (error) {
+            console.log(chalk.red('❌ Failed to update .gitignore:'), error.message);
+            console.log(chalk.yellow('You may want to manually add .claude/settings.json to your .gitignore file'));
+        }
     }
 
     async validateApiKey(baseUrl, apiKey) {
@@ -341,6 +443,89 @@ Intelligence Management Platform`));
         }
     }
 
+    async selectMCPServers() {
+        const availableServers = [
+            {
+                name: 'Context7',
+                description: 'Context7 MCP pulls up-to-date, version-specific documentation and code examples straight from the source — and places them directly into your prompt.',
+                command: 'claude mcp add context7 -- npx -y @upstash/context7-mcp'
+            }
+        ];
+
+        while (true) {
+            console.log(chalk.blue('\n🔌 Local MCP Servers Setup'));
+            console.log(chalk.gray('Select local MCP servers in addition to the ones provided by your Exulu IMP to enhance Claude\'s capabilities:\n'));
+
+            const choices = [
+                ...availableServers.map(server => ({
+                    name: `${server.name} - ${server.description.slice(0, 65)}...`,
+                    value: server.name
+                })),
+                { name: chalk.green('Continue to Claude'), value: 'continue' },
+                { name: chalk.red('Cancel'), value: 'cancel' }
+            ];
+
+            const { selection } = await inquirer.prompt([
+                {
+                    type: 'list',
+                    name: 'selection',
+                    message: 'Choose a local MCP to install:',
+                    choices
+                }
+            ]);
+
+            if (selection === 'continue') {
+                break;
+            }
+
+            if (selection === 'cancel') {
+                console.log(chalk.yellow('Operation cancelled.\n'));
+                await this.run();
+            }
+
+            const selectedServer = availableServers.find(server => server.name === selection);
+            if (selectedServer) {
+                await this.installMCPServer(selectedServer);
+            }
+        }
+    }
+
+    async installMCPServer(server) {
+        try {
+            console.log(chalk.yellow(`\nInstalling ${server.name} MCP server...`));
+            console.log(chalk.gray(`Running: ${server.command}\n`));
+            
+            execSync(server.command, { stdio: 'inherit' });
+            
+            console.log(chalk.green(`\n✅ Successfully installed ${server.name} MCP server!`));
+            console.log(chalk.gray('Press any key to return to MCP server list...'));
+            
+            await new Promise(resolve => {
+                process.stdin.setRawMode(true);
+                process.stdin.resume();
+                process.stdin.once('data', () => {
+                    process.stdin.setRawMode(false);
+                    process.stdin.pause();
+                    resolve();
+                });
+            });
+            
+        } catch (error) {
+            console.error(chalk.red(`\n❌ Failed to install ${server.name} MCP server:`), error.message);
+            console.log(chalk.gray('Press any key to return to MCP server list...'));
+            
+            await new Promise(resolve => {
+                process.stdin.setRawMode(true);
+                process.stdin.resume();
+                process.stdin.once('data', () => {
+                    process.stdin.setRawMode(false);
+                    process.stdin.pause();
+                    resolve();
+                });
+            });
+        }
+    }
+
     launchClaude() {
         try {
             // Replace current process with Claude Code
@@ -348,6 +533,272 @@ Intelligence Management Platform`));
         } catch (error) {
             console.error(chalk.red('❌ Failed to start Claude Code:'), error.message);
             process.exit(1);
+        }
+    }
+
+    async setupAgentOS() {
+        console.log(chalk.blue.bold('🏗️ Setting up Agent OS...'));
+        console.log(chalk.gray('Agent OS provides AI-powered development environment with coding standards integration.\n'));
+
+        // Validate settings first
+        const settings = await this.validateSettings();
+
+        // Step 1: Check if .agent-os folder exists
+        const agentOsPath = path.join(process.cwd(), '.agent-os');
+        const agentOsExists = fs.existsSync(agentOsPath);
+
+        if (!agentOsExists) {
+            console.log(chalk.yellow('📁 .agent-os folder not found. Installing Agent OS...'));
+            console.log(chalk.gray('Running: curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code\n'));
+            
+            try {
+                execSync('curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code', { 
+                    stdio: 'inherit',
+                    cwd: process.cwd()
+                });
+                console.log(chalk.green('✅ Agent OS installed successfully!\n'));
+            } catch (error) {
+                console.error(chalk.red('❌ Failed to install Agent OS:'), error.message);
+                console.log(chalk.yellow('You may need to install Agent OS manually or check your internet connection.'));
+                return;
+            }
+        } else {
+            console.log(chalk.green('✅ .agent-os folder found, skipping installation.\n'));
+        }
+
+        // Step 2: Fetch available coding standards
+        console.log(chalk.blue('📋 Fetching available coding standards...'));
+        
+        let codingStandards;
+        try {
+            const response = await fetch(`${settings.backend}/items/code-standards?page=1&limit=25`, {
+                headers: {
+                    'Authorization': `Bearer ${settings.token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const responseData = await response.json();
+            codingStandards = responseData.items;
+            
+            if (!Array.isArray(codingStandards) || codingStandards.length === 0) {
+                console.log(chalk.yellow('⚠️  No coding standards found in your Exulu instance.'));
+                console.log(chalk.gray('You can create coding standards in your Exulu web interface first.\n'));
+                return;
+            }
+
+            console.log(chalk.green(`✅ Found ${codingStandards.length} coding standard(s)\n`));
+
+        } catch (error) {
+            console.error(chalk.red('❌ Failed to fetch coding standards:'), error.message);
+            console.log(chalk.gray('Please check your connection to the Exulu backend.\n'));
+            return;
+        }
+
+        // Step 3: Let user select a coding standard
+        const { selectedStandardId } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'selectedStandardId',
+                message: 'Select a coding standard to apply:',
+                choices: [
+                    ...codingStandards.map(standard => ({
+                        name: standard.name,
+                        value: standard.id
+                    })),
+                    { name: chalk.gray('Cancel'), value: 'cancel' }
+                ]
+            }
+        ]);
+
+        if (selectedStandardId === 'cancel') {
+            console.log(chalk.yellow('Operation cancelled.\n'));
+            await this.run();
+        }
+
+        // Step 4: Fetch detailed coding standard content
+        console.log(chalk.blue('📄 Fetching coding standard details...'));
+        
+        let standardDetails;
+        try {
+            const response = await fetch(`${settings.backend}/items/code-standards/${selectedStandardId}`, {
+                headers: {
+                    'Authorization': `Bearer ${settings.token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            standardDetails = await response.json();
+            console.log(chalk.green('✅ Coding standard details retrieved\n'));
+
+        } catch (error) {
+            console.error(chalk.red('❌ Failed to fetch coding standard details:'), error.message);
+            return;
+        }
+
+        // Step 5: Show what will be overwritten and ask for confirmation
+        const standardsDir = path.join(agentOsPath, 'standards');
+        const codeStyleDir = path.join(standardsDir, 'code-style');
+        
+        const filesToOverwrite = [];
+        
+        // Check which files will be overwritten
+        const bestPracticesPath = path.join(standardsDir, 'best-practices.md');
+        const codeStylePath = path.join(standardsDir, 'code-style.md');
+        const techStackPath = path.join(standardsDir, 'tech-stack.md');
+        
+        if (fs.existsSync(bestPracticesPath)) filesToOverwrite.push('best-practices.md');
+        if (fs.existsSync(codeStylePath)) filesToOverwrite.push('code-style.md');
+        if (fs.existsSync(techStackPath)) filesToOverwrite.push('tech-stack.md');
+
+        console.log(chalk.yellow.bold('⚠️  File Overwrite Warning'));
+        console.log(chalk.gray('The following files will be created/overwritten:\n'));
+        
+        const allFiles = [];
+        
+        allFiles.push('best-practices.md');
+        allFiles.push('code-style.md');
+        allFiles.push('tech-stack.md');
+        
+        if (allFiles.length === 0) {
+            console.log(chalk.yellow('⚠️ No files with content found in this coding standard.'));
+            console.log(chalk.gray('Nothing will be written to your .agent-os folder.\n'));
+            // Go back to main menu
+            const { goBack } = await inquirer.prompt([
+                {
+                    type: 'confirm',
+                    name: 'goBack',
+                    message: 'Go back to main menu?',
+                    default: true
+                }
+            ]);
+            if (goBack) {
+                await this.run();
+            }
+            return;
+        }
+        
+        allFiles.forEach(file => {
+            const willOverwrite = filesToOverwrite.includes(file);
+            const icon = willOverwrite ? chalk.red('🔄 OVERWRITE') : chalk.green('📝 CREATE');
+            console.log(`  ${icon} .agent-os/standards/${file}`);
+        });
+
+        console.log(chalk.gray(`\nCoding Standard: ${chalk.white.bold(standardDetails.name)}`));
+        console.log(chalk.gray(`Total files: ${allFiles.length}`));
+
+        const { confirm } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'confirm',
+                message: 'Do you want to proceed with downloading the coding standards?',
+                default: false
+            }
+        ]);
+
+        if (!confirm) {
+            console.log(chalk.yellow('Operation cancelled.\n'));
+            // Go back to main menu
+            const { goBack } = await inquirer.prompt([
+                {
+                    type: 'confirm',
+                    name: 'goBack',
+                    message: 'Go back to main menu?',
+                    default: true
+                }
+            ]);
+            if (goBack) {
+                await this.run();
+            }
+        }
+
+        // Step 6: Create directories and write files
+        console.log(chalk.blue('📁 Creating directories...'));
+        
+        try {
+            // Create directories if they don't exist
+            if (!fs.existsSync(standardsDir)) {
+                fs.mkdirSync(standardsDir, { recursive: true });
+            }
+            if (!fs.existsSync(codeStyleDir)) {
+                fs.mkdirSync(codeStyleDir, { recursive: true });
+            }
+
+            console.log(chalk.green('✅ Directories created\n'));
+
+            // Step 7: Clear contents from code-style directory
+            console.log(chalk.blue('🧹 Clearing contents from .agent-os/standards/code-style...'));
+            
+            try {
+                if (fs.existsSync(codeStyleDir)) {
+                    const files = fs.readdirSync(codeStyleDir);
+                    for (const file of files) {
+                        const filePath = path.join(codeStyleDir, file);
+                        if (fs.statSync(filePath).isFile()) {
+                            fs.unlinkSync(filePath);
+                        }
+                    }
+                    console.log(chalk.green('✅ Code-style directory cleared\n'));
+                } else {
+                    console.log(chalk.yellow('⚠️ Code-style directory not found, skipping clear operation\n'));
+                }
+            } catch (error) {
+                console.log(chalk.red('❌ Failed to clear code-style directory:'), error.message);
+            }
+
+            // Step 8: Write main content files
+            console.log(chalk.blue('📝 Writing standard files...'));
+            
+            const writeFile = (filePath, content, description) => {
+                // Skip writing if content is empty or only whitespace
+                if (!content || content.trim() === '') {
+                    console.log(chalk.yellow(`  ⚠️ Skipping ${description} - no content available`));
+                    return;
+                }
+                fs.writeFileSync(filePath, content);
+                console.log(chalk.green(`  ✅ ${description}`));
+            };
+
+            writeFile(bestPracticesPath, standardDetails.best_practices?.length > 2 ? standardDetails.best_practices : "No best practices defined.", 'best-practices.md');
+            writeFile(codeStylePath, standardDetails.code_style?.length > 2 ? standardDetails.code_style : "No code styles defined.", 'code-style.md');
+            writeFile(techStackPath, standardDetails.tech_stack?.length > 2 ? standardDetails.tech_stack : "No tech stack defined.", 'tech-stack.md');
+
+            console.log(chalk.green.bold('\n🎉 Coding standards setup complete!'));
+            console.log(chalk.gray('Your Agent OS environment now has the following structure:'));
+            console.log(chalk.cyan(`
+📂 .agent-os/standards/
+├── 📄 best-practices.md
+├── 📄 code-style.md
+└── 📄 tech-stack.md
+            `));
+
+            console.log(chalk.blue('💡 These files will help AI assistants understand your coding standards and best practices.\n'));
+
+        } catch (error) {
+            console.error(chalk.red('❌ Failed to write files:'), error.message);
+            return;
+        }
+
+        // Return to main menu
+        const { goBack } = await inquirer.prompt([
+            {
+                type: 'confirm',
+                name: 'goBack',
+                message: 'Go back to main menu?',
+                default: true
+            }
+        ]);
+
+        if (goBack) {
+            await this.run();
         }
     }
 
