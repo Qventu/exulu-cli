@@ -7,7 +7,7 @@ const inquirer = require('inquirer');
 const chalk = require('chalk');
 const https = require('https');
 const http = require('http');
-const { gql, request, GraphQLClient } = require('graphql-request')
+const { gql, GraphQLClient } = require('graphql-request')
 
 class ExuluCLI {
     constructor() {
@@ -498,19 +498,28 @@ Intelligence Management Platform`));
 
         let codingStandards;
         try {
-            const response = await fetch(`${settings.backend}/items/code-standards?page=1&limit=25`, {
-                headers: {
-                    'Authorization': `Bearer ${settings.token}`,
-                    'Content-Type': 'application/json'
+
+            const document = gql`
+            {
+            code_standards_itemsPagination(page: 1, limit: 25) {
+                items {
+                    id
+                    name
+                    description
+                    updatedAt
+                    createdAt
+                    }
                 }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
+            `
+            const client = new GraphQLClient(`${baseUrl}/graphql`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            const response = await client.request(document);
 
-            const responseData = await response.json();
-            codingStandards = responseData.items;
+            const codingStandards = await response.code_standards_itemsPagination.items;
 
             if (!Array.isArray(codingStandards) || codingStandards.length === 0) {
                 console.log(chalk.yellow('⚠️  No coding standards found in your Exulu instance.'));
@@ -552,18 +561,26 @@ Intelligence Management Platform`));
 
         let standardDetails;
         try {
-            const response = await fetch(`${settings.backend}/items/code-standards/${selectedStandardId}`, {
-                headers: {
-                    'Authorization': `Bearer ${settings.token}`,
-                    'Content-Type': 'application/json'
+
+            const document = gql`
+            {
+                code_standards_itemsById(id: "${selectedStandardId}") {
+                    id
+                    name
+                    description
+                    best_practices
+                    code_style
+                    tech_stack
                 }
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-
-            standardDetails = await response.json();
+            `
+            const client = new GraphQLClient(`${baseUrl}/graphql`, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            const response = await client.request(document);;
+            standardDetails = response.code_standards_itemsById;
             console.log(chalk.green('✅ Coding standard details retrieved\n'));
 
         } catch (error) {
@@ -730,19 +747,33 @@ Intelligence Management Platform`));
     }
 
     async listContexts({ backend, token }) {
-        const response = await fetch(`${backend}/contexts`, {
-            headers: {
-                'Authorization': `Bearer ${token}`
+
+        const document = gql`
+        {
+            contexts {
+                items {
+                    id
+                    name
+                    description
+                }
             }
+        }
+        `
+        const client = new GraphQLClient(`${backend}/graphql`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
         });
-        const data = await response.json();
+        const response = await client.request(document);
+        const contexts = await response.contexts.items;
+
         console.log(chalk.blue('✅ Contexts:'));
-        console.table(data.map(context => ({
+        console.table(contexts.map(context => ({
             id: context.id?.slice(0, 8) + '...',
             name: context.name,
             description: context.description?.slice(0, 40) + '...',
         })));
-        console.log(chalk.gray('Total contexts: ' + data.length));
+        console.log(chalk.gray('Total contexts: ' + contexts.length));
 
         const { goBack } = await inquirer.prompt([
             {
@@ -776,19 +807,33 @@ Intelligence Management Platform`));
     }
 
     async listAgents({ backend, token }) {
-        const response = await fetch(`${backend}/agents`, {
-            headers: {
-                'Authorization': `Bearer ${token}`
+
+        const document = gql`
+        {
+            agentsPagination(page: 1, limit: 50) {
+                items {
+                id
+                name
+                description
+                }
             }
+        }
+        `
+        const client = new GraphQLClient(`${backend}/graphql`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
         });
-        const data = await response.json();
+        const response = await client.request(document);
+        const agents = await response.agentsPagination.items;
+
         console.log(chalk.blue('✅ Agents:'));
-        console.table(data.map(agent => ({
+        console.table(agents.map(agent => ({
             id: agent.id?.slice(0, 8) + '...',
             name: agent.name,
             description: agent.description?.slice(0, 40) + '...',
         })));
-        console.log(chalk.gray('Total agents: ' + data.length));
+        console.log(chalk.gray('Total agents: ' + agents.length));
 
         const { goBack } = await inquirer.prompt([
             {
