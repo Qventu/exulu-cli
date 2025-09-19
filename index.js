@@ -7,6 +7,7 @@ const inquirer = require('inquirer');
 const chalk = require('chalk');
 const https = require('https');
 const http = require('http');
+const { gql, request, GraphQLClient } = require('graphql-request')
 
 class ExuluCLI {
     constructor() {
@@ -86,9 +87,6 @@ Intelligence Management Platform`));
             await this.installClaude();
         }
 
-        // Show MCP server selection
-        await this.selectMCPServers();
-
         // Start Claude Code
         console.log(chalk.green('✅ Setup complete! Starting Claude Code...\n'));
         this.launchClaude();
@@ -138,19 +136,31 @@ Intelligence Management Platform`));
         const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
         const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
 
-        const response = await fetch(`${baseUrl}/agents`, {
-            headers: {
-                'Authorization': `Bearer ${token}`
+        const document = gql`
+            {
+                agentsPagination(page: 1, limit: 30, filters: {
+                    category: {
+                        eq: "coding"
+                    }
+                }) {
+                    items {
+                        id
+                        name
+                        description
+                    }
+                }
             }
+        `
+        const client = new GraphQLClient(`${baseUrl}/graphql`, {
+            headers: {
+                Authorization: `Bearer ${token}`,
+            },
         });
-        if (response.status !== 200) {
-            console.log(chalk.red('❌  Failed to get agents, please check your API key or try restarting the CLI\n'));
-            process.exit(1);
-        }
+        const response = await client.request(document);
 
-        const data = await response.json();
+        console.log("response", response)
 
-        const agents = data.filter(agent => agent.type === 'custom');
+        const agents = await response.agentsPagination.items;
 
         console.log(chalk.blue('✅ Agents:'));
         console.table(agents.map(agent => ({
@@ -300,7 +310,7 @@ Intelligence Management Platform`));
         if (fs.existsSync(gitignorePath)) {
             gitignoreContent = fs.readFileSync(gitignorePath, 'utf8');
             const lines = gitignoreContent.split('\n').map(line => line.trim());
-            
+
             hasClaudeSettingsJson = lines.includes(claudeSettingsEntry);
             hasClaudeDir = lines.includes(claudeDirEntry);
         }
@@ -333,10 +343,10 @@ Intelligence Management Platform`));
                         new RegExp(`^${claudeDirEntry}$`, 'm'),
                         claudeSettingsEntry
                     );
-                    
+
                     fs.writeFileSync(gitignorePath, updatedContent);
                     console.log(chalk.green('✅ Updated .gitignore: replaced ".claude" with ".claude/settings.json"'));
-                    
+
                 } catch (error) {
                     console.log(chalk.red('❌ Failed to update .gitignore:'), error.message);
                     console.log(chalk.yellow('You may want to manually change ".claude" to ".claude/settings.json" in your .gitignore file'));
@@ -365,15 +375,15 @@ Intelligence Management Platform`));
 
         try {
             // Add entry to .gitignore
-            const entryToAdd = gitignoreContent.endsWith('\n') || gitignoreContent === '' 
+            const entryToAdd = gitignoreContent.endsWith('\n') || gitignoreContent === ''
                 ? claudeSettingsEntry + '\n'
                 : '\n' + claudeSettingsEntry + '\n';
 
             fs.appendFileSync(gitignorePath, entryToAdd);
-            
+
             const action = fs.existsSync(gitignorePath) && gitignoreContent ? 'updated' : 'created';
             console.log(chalk.green(`✅ .gitignore ${action} with .claude/settings.json entry`));
-            
+
         } catch (error) {
             console.log(chalk.red('❌ Failed to update .gitignore:'), error.message);
             console.log(chalk.yellow('You may want to manually add .claude/settings.json to your .gitignore file'));
@@ -443,89 +453,6 @@ Intelligence Management Platform`));
         }
     }
 
-    async selectMCPServers() {
-        const availableServers = [
-            {
-                name: 'Context7',
-                description: 'Context7 MCP pulls up-to-date, version-specific documentation and code examples straight from the source — and places them directly into your prompt.',
-                command: 'claude mcp add context7 -- npx -y @upstash/context7-mcp'
-            }
-        ];
-
-        while (true) {
-            console.log(chalk.blue('\n🔌 Local MCP Servers Setup'));
-            console.log(chalk.gray('Select local MCP servers in addition to the ones provided by your Exulu IMP to enhance Claude\'s capabilities:\n'));
-
-            const choices = [
-                ...availableServers.map(server => ({
-                    name: `${server.name} - ${server.description.slice(0, 65)}...`,
-                    value: server.name
-                })),
-                { name: chalk.green('Continue to Claude'), value: 'continue' },
-                { name: chalk.red('Cancel'), value: 'cancel' }
-            ];
-
-            const { selection } = await inquirer.prompt([
-                {
-                    type: 'list',
-                    name: 'selection',
-                    message: 'Choose a local MCP to install:',
-                    choices
-                }
-            ]);
-
-            if (selection === 'continue') {
-                break;
-            }
-
-            if (selection === 'cancel') {
-                console.log(chalk.yellow('Operation cancelled.\n'));
-                await this.run();
-            }
-
-            const selectedServer = availableServers.find(server => server.name === selection);
-            if (selectedServer) {
-                await this.installMCPServer(selectedServer);
-            }
-        }
-    }
-
-    async installMCPServer(server) {
-        try {
-            console.log(chalk.yellow(`\nInstalling ${server.name} MCP server...`));
-            console.log(chalk.gray(`Running: ${server.command}\n`));
-            
-            execSync(server.command, { stdio: 'inherit' });
-            
-            console.log(chalk.green(`\n✅ Successfully installed ${server.name} MCP server!`));
-            console.log(chalk.gray('Press any key to return to MCP server list...'));
-            
-            await new Promise(resolve => {
-                process.stdin.setRawMode(true);
-                process.stdin.resume();
-                process.stdin.once('data', () => {
-                    process.stdin.setRawMode(false);
-                    process.stdin.pause();
-                    resolve();
-                });
-            });
-            
-        } catch (error) {
-            console.error(chalk.red(`\n❌ Failed to install ${server.name} MCP server:`), error.message);
-            console.log(chalk.gray('Press any key to return to MCP server list...'));
-            
-            await new Promise(resolve => {
-                process.stdin.setRawMode(true);
-                process.stdin.resume();
-                process.stdin.once('data', () => {
-                    process.stdin.setRawMode(false);
-                    process.stdin.pause();
-                    resolve();
-                });
-            });
-        }
-    }
-
     launchClaude() {
         try {
             // Replace current process with Claude Code
@@ -550,9 +477,9 @@ Intelligence Management Platform`));
         if (!agentOsExists) {
             console.log(chalk.yellow('📁 .agent-os folder not found. Installing Agent OS...'));
             console.log(chalk.gray('Running: curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code\n'));
-            
+
             try {
-                execSync('curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code', { 
+                execSync('curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code', {
                     stdio: 'inherit',
                     cwd: process.cwd()
                 });
@@ -568,7 +495,7 @@ Intelligence Management Platform`));
 
         // Step 2: Fetch available coding standards
         console.log(chalk.blue('📋 Fetching available coding standards...'));
-        
+
         let codingStandards;
         try {
             const response = await fetch(`${settings.backend}/items/code-standards?page=1&limit=25`, {
@@ -584,7 +511,7 @@ Intelligence Management Platform`));
 
             const responseData = await response.json();
             codingStandards = responseData.items;
-            
+
             if (!Array.isArray(codingStandards) || codingStandards.length === 0) {
                 console.log(chalk.yellow('⚠️  No coding standards found in your Exulu instance.'));
                 console.log(chalk.gray('You can create coding standards in your Exulu web interface first.\n'));
@@ -622,7 +549,7 @@ Intelligence Management Platform`));
 
         // Step 4: Fetch detailed coding standard content
         console.log(chalk.blue('📄 Fetching coding standard details...'));
-        
+
         let standardDetails;
         try {
             const response = await fetch(`${settings.backend}/items/code-standards/${selectedStandardId}`, {
@@ -647,27 +574,27 @@ Intelligence Management Platform`));
         // Step 5: Show what will be overwritten and ask for confirmation
         const standardsDir = path.join(agentOsPath, 'standards');
         const codeStyleDir = path.join(standardsDir, 'code-style');
-        
+
         const filesToOverwrite = [];
-        
+
         // Check which files will be overwritten
         const bestPracticesPath = path.join(standardsDir, 'best-practices.md');
         const codeStylePath = path.join(standardsDir, 'code-style.md');
         const techStackPath = path.join(standardsDir, 'tech-stack.md');
-        
+
         if (fs.existsSync(bestPracticesPath)) filesToOverwrite.push('best-practices.md');
         if (fs.existsSync(codeStylePath)) filesToOverwrite.push('code-style.md');
         if (fs.existsSync(techStackPath)) filesToOverwrite.push('tech-stack.md');
 
         console.log(chalk.yellow.bold('⚠️  File Overwrite Warning'));
         console.log(chalk.gray('The following files will be created/overwritten:\n'));
-        
+
         const allFiles = [];
-        
+
         allFiles.push('best-practices.md');
         allFiles.push('code-style.md');
         allFiles.push('tech-stack.md');
-        
+
         if (allFiles.length === 0) {
             console.log(chalk.yellow('⚠️ No files with content found in this coding standard.'));
             console.log(chalk.gray('Nothing will be written to your .agent-os folder.\n'));
@@ -685,7 +612,7 @@ Intelligence Management Platform`));
             }
             return;
         }
-        
+
         allFiles.forEach(file => {
             const willOverwrite = filesToOverwrite.includes(file);
             const icon = willOverwrite ? chalk.red('🔄 OVERWRITE') : chalk.green('📝 CREATE');
@@ -722,7 +649,7 @@ Intelligence Management Platform`));
 
         // Step 6: Create directories and write files
         console.log(chalk.blue('📁 Creating directories...'));
-        
+
         try {
             // Create directories if they don't exist
             if (!fs.existsSync(standardsDir)) {
@@ -736,7 +663,7 @@ Intelligence Management Platform`));
 
             // Step 7: Clear contents from code-style directory
             console.log(chalk.blue('🧹 Clearing contents from .agent-os/standards/code-style...'));
-            
+
             try {
                 if (fs.existsSync(codeStyleDir)) {
                     const files = fs.readdirSync(codeStyleDir);
@@ -756,7 +683,7 @@ Intelligence Management Platform`));
 
             // Step 8: Write main content files
             console.log(chalk.blue('📝 Writing standard files...'));
-            
+
             const writeFile = (filePath, content, description) => {
                 // Skip writing if content is empty or only whitespace
                 if (!content || content.trim() === '') {
@@ -833,17 +760,17 @@ Intelligence Management Platform`));
 
     async changeSettings() {
         console.log(chalk.yellow('🔄 Changing settings...\n'));
-        
+
         // Delete existing settings file to force recreation
         if (fs.existsSync(this.claudeSettingsPath)) {
             fs.unlinkSync(this.claudeSettingsPath);
         }
-        
+
         // Re-run the settings validation which will prompt for new values
         await this.validateSettings();
-        
+
         console.log(chalk.green('✅ Settings updated successfully!\n'));
-        
+
         // Go back to main menu
         await this.run();
     }

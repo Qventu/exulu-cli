@@ -1,1 +1,0 @@
-No best practices defined

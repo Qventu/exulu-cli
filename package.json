@@ -32,6 +32,7 @@
     "axios": "^1.11.0",
     "chalk": "^4.1.2",
     "conventional-changelog-atom": "^5.0.0",
+    "graphql-request": "^7.2.0",
     "inquirer": "^8.2.6",
     "keypress": "^0.2.1",
     "mic": "^2.1.2",
