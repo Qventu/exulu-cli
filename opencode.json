@@ -1,0 +1,21 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "edit": "ask",
+    "bash": "ask",
+    "*": "ask"
+  },
+  "disabled_providers": ["opencode"],
+  "provider": {
+    "anthropic": {
+      "options": {
+        "baseURL": "http://localhost:9001/proxy-test/8b542f66-48bb-4b10-af52-8fe0b41a0a3e",
+        "apiKey": "placeholder",
+        "headers": {
+          "provider": "anthropic",
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEiLCJlbWFpbCI6ImFkbWluQGV4dWx1LmNvbSIsImlhdCI6MTc1ODk5MjA2NCwiZXhwIjoxNzkwNTI4MDY0fQ.HyZZQAB4XFP5R_Hh1NGnxetvRx5YUowzh0FNiPA6vm4"
+        }
+      }
+    }
+  }
+}

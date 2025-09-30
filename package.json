@@ -29,6 +29,7 @@
     "exulu"
   ],
   "dependencies": {
+    "@opencode-ai/plugin": "^0.12.1",
     "axios": "^1.11.0",
     "chalk": "^4.1.2",
     "conventional-changelog-atom": "^5.0.0",

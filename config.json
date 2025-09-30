@@ -1,0 +1,41 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "command": {},
+  "plugin": [
+    "file:///Users/daniel.claessen/Desktop/Projects/exulu/cli/.opencode/plugin/test.ts"
+  ],
+  "username": "daniel.claessen",
+  "mode": {},
+  "agent": {},
+  "provider": {
+    "exulu": {
+      "name": "Exulu Intelligence Management Platform",
+      "npm": "@ai-sdk/anthropic",
+      "models": {
+        "claude-sonnet-4-20250514": {
+          "name": "Claude Sonnet",
+          "options": {
+            "reasoningEffort": "high",
+            "textVerbosity": "low",
+            "reasoningSummary": "auto",
+            "thinking": {
+              "type": "enabled",
+              "budgetTokens": 16000
+            },
+            "include": [
+              "reasoning.encrypted_content"
+            ]
+          }
+        }
+      },
+      "options": {
+        "apiKey": "eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEiLCJlbWFpbCI6ImFkbWluQGV4dWx1LmNvbSIsImlhdCI6MTc1ODk1NjExNCwiZXhwIjoxNzkwNDkyMTE0fQ.sProWjSYJR1_rsmuL7E8CKPzmMbtFlJijpQGmG0Wf00",
+        "baseURL": "http://localhost:9001/test",
+        "headers": {
+          "Authorization": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJpZCI6IjEiLCJlbWFpbCI6ImFkbWluQGV4dWx1LmNvbSIsImlhdCI6MTc1ODk1NjExNCwiZXhwIjoxNzkwNDkyMTE0fQ.sProWjSYJR1_rsmuL7E8CKPzmMbtFlJijpQGmG0Wf00"
+        }
+      }
+    }
+  },
+  "permission": {}
+}

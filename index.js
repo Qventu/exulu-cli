@@ -9,6 +9,21 @@ const https = require('https');
 const http = require('http');
 const { gql, GraphQLClient } = require('graphql-request')
 
+const tips = [
+    "Install the **Claude Code extension** in your IDE so Claude Code can recognize your current open file, and selected code.",
+    "In the **terminal UI**: you can @-tag files, use slash commands, and explicitly select the context to include.",
+    "Run `/clear` frequently when switching tasks to trim history and reduce token usage overhead.",
+    "Use **`claude --dangerously-skip-permissions`** (or similar config) to bypass repetitive permission prompts if you trust your project context.",
+    "Customize your PR review prompt via `claude-code-review.yml` — e.g. tell Claude to *only* report bugs or security issues, and keep it concise.",
+    "Set up **terminal mode properly** (e.g. `/terminal-setup`) so that Shift+Enter and input behavior work as expected.",
+    "Remember: **Escape** stops the current run; pressing Escape twice shows a list of past messages you can navigate back to.",
+    "Define and use **hooks** (e.g. PreToolUse, PostToolUse) and custom slash commands to integrate Claude into your dev workflow.",
+    "Feed console/terminal errors, log traces, or screenshots directly into Claude rather than translating them yourself. It helps it debug more precisely.",
+    "Favor **small diffs** over sprawling edits — it makes review easier and reduces risk of unintended changes.",
+    "Prompt Claude to write tests first (TDD style) then implement code to satisfy those tests.",
+    "Be specific in your prompt: mention exactly which files, modules, or functions to operate on. Vague prompts cause more back-and-forth."
+]
+
 class ExuluCLI {
     constructor() {
         this.claudeSettingsPath = path.join(process.cwd(), '.claude', 'settings.json');
@@ -23,14 +38,9 @@ class ExuluCLI {
 ██╔══╝   ██╔██╗ ██║   ██║██║      ██║   ██║
 ███████╗██╔╝ ██╗╚██████╔╝███████╗╚██████╔╝
 ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝ ╚═════╝ 
-Intelligence Management Platform`));
-        console.log(chalk.cyan('\n┌─────────────────────────────────────────────────────────────────────────────┐'));
-        console.log(chalk.cyan('│') + chalk.bgCyan.black.bold(' 💡 PRO TIP OF THE DAY: ') + chalk.cyan('                                                     │'));
-        console.log(chalk.cyan('├─────────────────────────────────────────────────────────────────────────────┤'));
-        console.log(chalk.cyan('│ ') + chalk.cyan.bold('Did you know that on Mac, you can enable "Dictation" in System Settings') + chalk.cyan('     │'));
-        console.log(chalk.cyan('│ ') + chalk.cyan('and map it to a shortcut. This allows you to speak to Claude directly') + chalk.cyan('       │'));
-        console.log(chalk.cyan('│ ') + chalk.cyan('in the terminal!') + chalk.cyan('                                                            │'));
-        console.log(chalk.cyan('└─────────────────────────────────────────────────────────────────────────────┘\n'));
+Intelligence Management Platform \n\n`));
+        console.log(chalk.bgCyan.black.bold(' 💡 PRO TIP OF THE DAY: '))
+        console.log(chalk.cyan.bold(tips[Math.floor(Math.random() * tips.length)]) + '\n\n');
 
 
         // Validate or create settings.json
@@ -236,7 +246,7 @@ Intelligence Management Platform`));
 
             settings.env = {
                 ANTHROPIC_BASE_URL: data.backend + "/gateway/anthropic",
-                DISABLE_AUTOUPDATER: 1
+                DISABLE_AUTOUPDATER: 0
             };
 
             await this.setupApiKey(baseUrl + "/token", settings);
@@ -456,7 +466,7 @@ Intelligence Management Platform`));
     launchClaude() {
         try {
             // Replace current process with Claude Code
-            execSync('claude', { stdio: 'inherit' });
+            execSync('claude --output-format stream-json', { stdio: 'inherit' });
         } catch (error) {
             console.error(chalk.red('❌ Failed to start Claude Code:'), error.message);
             process.exit(1);
@@ -498,16 +508,15 @@ Intelligence Management Platform`));
 
         let codingStandards;
         try {
-
             const document = gql`
             {
-            code_standards_itemsPagination(page: 1, limit: 25) {
-                items {
-                    id
-                    name
-                    description
-                    updatedAt
-                    createdAt
+                code_standards_itemsPagination(page: 1, limit: 25) {
+                    items {
+                        id
+                        name
+                        description
+                        updatedAt
+                        createdAt
                     }
                 }
             }
@@ -815,6 +824,7 @@ Intelligence Management Platform`));
                 id
                 name
                 description
+                modelName
                 }
             }
         }
