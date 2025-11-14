@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Load environment variables from .env file
+require('dotenv').config();
+
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
@@ -192,11 +195,100 @@ Intelligence Management Platform \n\n`));
             }
         ]);
 
-        settings.env.ANTHROPIC_BASE_URL = `${baseUrl}/gateway/anthropic/${agent}`;
+        // Now get projects for project selection
+        const projectDocument = gql`
+            {
+                projectsPagination(limit: 10, page: 1) {
+                    items {
+                        id
+                        name
+                        description
+                        createdAt
+                        updatedAt
+                    }
+                }
+            }
+        `
+        const projectResponse = await client.request(projectDocument);
+        const projects = projectResponse.projectsPagination.items;
+
+        console.log(chalk.blue('✅ Projects:'));
+        console.table(projects.map(project => ({
+            id: project.id?.slice(0, 8) + '...',
+            name: project.name,
+            description: project.description?.slice(0, 40) + '...',
+        })));
+        console.log(chalk.gray('Total projects: ' + projects.length));
+
+        const { project } = await inquirer.prompt([
+            {
+                type: 'list',
+                name: 'project',
+                message: 'Select a project:',
+                choices: [
+                    ...projects.map(project => ({
+                        name: project.name,
+                        value: project.id
+                    })),
+                    { name: 'No project', value: 'DEFAULT' }
+                ]
+            }
+        ]);
+
+        settings.env.ANTHROPIC_BASE_URL = `${baseUrl}/gateway/anthropic/${agent}/${project}`;
         fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
 
-        console.log(chalk.green(`✅ Agent ${agent} selected\n`));
-        return agent;
+        // Get agent details to create MCP config
+        const selectedAgent = agents.find(a => a.id === agent);
+        await this.updateMcpConfig(baseUrl, agent, selectedAgent.name);
+
+        console.log(chalk.green(`✅ Agent ${agent} and project ${project} selected\n`));
+        return { agent, project };
+    }
+
+    async updateMcpConfig(baseUrl, agentId, agentName) {
+        const mcpConfigPath = path.join(process.cwd(), '.mcp.json');
+
+        // Create the agent entry key
+        const agentKey = `exulu-mcp-server-${agentName.toLowerCase().replace(/\s+/g, '-')}`;
+
+        // Create the new agent configuration
+        const agentConfig = {
+            type: "http",
+            url: `${baseUrl}/mcp/${agentId}`,
+            headers: {
+                Authorization: "Bearer ${EXULU_TOKEN}"
+            }
+        };
+
+        let mcpConfig = {};
+
+        // Load existing .mcp.json if it exists
+        if (fs.existsSync(mcpConfigPath)) {
+            try {
+                const fileContent = fs.readFileSync(mcpConfigPath, 'utf8');
+                mcpConfig = JSON.parse(fileContent);
+            } catch (error) {
+                console.log(chalk.yellow('⚠️  Invalid .mcp.json found, creating new one...'));
+                mcpConfig = {};
+            }
+        }
+
+        // Ensure mcpServers object exists
+        if (!mcpConfig.mcpServers) {
+            mcpConfig.mcpServers = {};
+        }
+
+        // Add or update the agent entry
+        mcpConfig.mcpServers[agentKey] = agentConfig;
+
+        // Write the updated config back to file
+        try {
+            fs.writeFileSync(mcpConfigPath, JSON.stringify(mcpConfig, null, 2));
+            console.log(chalk.green(`✅ MCP configuration updated: ${agentKey}\n`));
+        } catch (error) {
+            console.log(chalk.red('❌ Failed to update .mcp.json:'), error.message);
+        }
     }
 
     async validateSettings() {
@@ -465,8 +557,21 @@ Intelligence Management Platform \n\n`));
 
     launchClaude() {
         try {
+            // Load settings to get the token
+            if (fs.existsSync(this.claudeSettingsPath)) {
+                const settings = JSON.parse(fs.readFileSync(this.claudeSettingsPath, 'utf8'));
+                const token = settings.apiKeyHelper.replace('echo ', '').trim();
+
+                // Add EXULU_TOKEN to environment for MCP servers
+                process.env.EXULU_TOKEN = token;
+            }
+
             // Replace current process with Claude Code
-            execSync('claude --output-format stream-json', { stdio: 'inherit' });
+            // Explicitly pass environment variables including those from .env
+            execSync('claude --output-format stream-json', {
+                stdio: 'inherit',
+                env: process.env
+            });
         } catch (error) {
             console.error(chalk.red('❌ Failed to start Claude Code:'), error.message);
             process.exit(1);

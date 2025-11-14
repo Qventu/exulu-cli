@@ -8,7 +8,7 @@
     "access": "public"
   },
   "engines": {
-    "node": "22.17.1"
+    "node": "22.18.0"
   },
   "repository": {
     "type": "git",
@@ -33,6 +33,7 @@
     "axios": "^1.11.0",
     "chalk": "^4.1.2",
     "conventional-changelog-atom": "^5.0.0",
+    "dotenv": "^17.2.3",
     "graphql-request": "^7.2.0",
     "inquirer": "^8.2.6",
     "keypress": "^0.2.1",

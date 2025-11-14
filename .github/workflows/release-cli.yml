@@ -1,4 +1,4 @@
-name: Release
+name: Release CLI
 on:
   push:
     branches:
@@ -24,13 +24,12 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.17.1"
+          node-version: "22.18.0"
       - name: Install dependencies
         run: npm clean-install
       # - name: Verify the integrity of provenance attestations and registry signatures for installed dependencies
       #   run: npm audit signatures
       - name: Release CLI
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: HUSKY=0 npm run semantic-release
