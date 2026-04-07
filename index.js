@@ -56,7 +56,6 @@ Intelligence Management Platform \n\n`));
                 message: 'What would you like to do?',
                 choices: [
                     { name: '> Start Claude Code', value: 'start-claude' },
-                    { name: '> Setup Agent OS', value: 'setup-agent-os' },
                     { name: '> List agents', value: 'list-agents' },
                     { name: '> List contexts', value: 'list-contexts' },
                     { name: '> Change settings', value: 'change-settings' },
@@ -67,9 +66,6 @@ Intelligence Management Platform \n\n`));
         switch (action) {
             case 'start-claude':
                 await this.startClaude();
-                break;
-            case 'setup-agent-os':
-                await this.setupAgentOS();
                 break;
             case 'list-agents':
                 await this.listAgents({
@@ -328,7 +324,10 @@ Intelligence Management Platform \n\n`));
                 }
             ]);
 
-            const response = await fetch(`${baseUrl}/api/config`);
+            // Remove trailing slash if present
+            const cleanBaseUrl = baseUrl.replace(/\/+$/, '');
+
+            const response = await fetch(`${cleanBaseUrl}/api/config`);
             const data = await response.json();
 
             if (!data.backend) {
@@ -341,7 +340,7 @@ Intelligence Management Platform \n\n`));
                 DISABLE_AUTOUPDATER: 0
             };
 
-            await this.setupApiKey(baseUrl + "/token", settings);
+            await this.setupApiKey(cleanBaseUrl + "/token", settings);
 
         } else {
             // Check if existing API key is still valid
@@ -575,288 +574,6 @@ Intelligence Management Platform \n\n`));
         } catch (error) {
             console.error(chalk.red('❌ Failed to start Claude Code:'), error.message);
             process.exit(1);
-        }
-    }
-
-    async setupAgentOS() {
-        console.log(chalk.blue.bold('🏗️ Setting up Agent OS...'));
-        console.log(chalk.gray('Agent OS provides AI-powered development environment with coding standards integration.\n'));
-
-        // Validate settings first
-        const settings = await this.validateSettings();
-
-        // Step 1: Check if .agent-os folder exists
-        const agentOsPath = path.join(process.cwd(), '.agent-os');
-        const agentOsExists = fs.existsSync(agentOsPath);
-
-        if (!agentOsExists) {
-            console.log(chalk.yellow('📁 .agent-os folder not found. Installing Agent OS...'));
-            console.log(chalk.gray('Running: curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code\n'));
-
-            try {
-                execSync('curl -sSL https://raw.githubusercontent.com/buildermethods/agent-os/main/setup/project.sh | bash -s -- --no-base --claude-code', {
-                    stdio: 'inherit',
-                    cwd: process.cwd()
-                });
-                console.log(chalk.green('✅ Agent OS installed successfully!\n'));
-            } catch (error) {
-                console.error(chalk.red('❌ Failed to install Agent OS:'), error.message);
-                console.log(chalk.yellow('You may need to install Agent OS manually or check your internet connection.'));
-                return;
-            }
-        } else {
-            console.log(chalk.green('✅ .agent-os folder found, skipping installation.\n'));
-        }
-
-        // Step 2: Fetch available coding standards
-        console.log(chalk.blue('📋 Fetching available coding standards...'));
-
-        let codingStandards;
-        try {
-            const document = gql`
-            {
-                code_standards_itemsPagination(page: 1, limit: 25) {
-                    items {
-                        id
-                        name
-                        description
-                        updatedAt
-                        createdAt
-                    }
-                }
-            }
-            `
-            const client = new GraphQLClient(`${baseUrl}/graphql`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            const response = await client.request(document);
-
-            const codingStandards = await response.code_standards_itemsPagination.items;
-
-            if (!Array.isArray(codingStandards) || codingStandards.length === 0) {
-                console.log(chalk.yellow('⚠️  No coding standards found in your Exulu instance.'));
-                console.log(chalk.gray('You can create coding standards in your Exulu web interface first.\n'));
-                return;
-            }
-
-            console.log(chalk.green(`✅ Found ${codingStandards.length} coding standard(s)\n`));
-
-        } catch (error) {
-            console.error(chalk.red('❌ Failed to fetch coding standards:'), error.message);
-            console.log(chalk.gray('Please check your connection to the Exulu backend.\n'));
-            return;
-        }
-
-        // Step 3: Let user select a coding standard
-        const { selectedStandardId } = await inquirer.prompt([
-            {
-                type: 'list',
-                name: 'selectedStandardId',
-                message: 'Select a coding standard to apply:',
-                choices: [
-                    ...codingStandards.map(standard => ({
-                        name: standard.name,
-                        value: standard.id
-                    })),
-                    { name: chalk.gray('Cancel'), value: 'cancel' }
-                ]
-            }
-        ]);
-
-        if (selectedStandardId === 'cancel') {
-            console.log(chalk.yellow('Operation cancelled.\n'));
-            await this.run();
-        }
-
-        // Step 4: Fetch detailed coding standard content
-        console.log(chalk.blue('📄 Fetching coding standard details...'));
-
-        let standardDetails;
-        try {
-
-            const document = gql`
-            {
-                code_standards_itemsById(id: "${selectedStandardId}") {
-                    id
-                    name
-                    description
-                    best_practices
-                    code_style
-                    tech_stack
-                }
-            }
-            `
-            const client = new GraphQLClient(`${baseUrl}/graphql`, {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            const response = await client.request(document);;
-            standardDetails = response.code_standards_itemsById;
-            console.log(chalk.green('✅ Coding standard details retrieved\n'));
-
-        } catch (error) {
-            console.error(chalk.red('❌ Failed to fetch coding standard details:'), error.message);
-            return;
-        }
-
-        // Step 5: Show what will be overwritten and ask for confirmation
-        const standardsDir = path.join(agentOsPath, 'standards');
-        const codeStyleDir = path.join(standardsDir, 'code-style');
-
-        const filesToOverwrite = [];
-
-        // Check which files will be overwritten
-        const bestPracticesPath = path.join(standardsDir, 'best-practices.md');
-        const codeStylePath = path.join(standardsDir, 'code-style.md');
-        const techStackPath = path.join(standardsDir, 'tech-stack.md');
-
-        if (fs.existsSync(bestPracticesPath)) filesToOverwrite.push('best-practices.md');
-        if (fs.existsSync(codeStylePath)) filesToOverwrite.push('code-style.md');
-        if (fs.existsSync(techStackPath)) filesToOverwrite.push('tech-stack.md');
-
-        console.log(chalk.yellow.bold('⚠️  File Overwrite Warning'));
-        console.log(chalk.gray('The following files will be created/overwritten:\n'));
-
-        const allFiles = [];
-
-        allFiles.push('best-practices.md');
-        allFiles.push('code-style.md');
-        allFiles.push('tech-stack.md');
-
-        if (allFiles.length === 0) {
-            console.log(chalk.yellow('⚠️ No files with content found in this coding standard.'));
-            console.log(chalk.gray('Nothing will be written to your .agent-os folder.\n'));
-            // Go back to main menu
-            const { goBack } = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'goBack',
-                    message: 'Go back to main menu?',
-                    default: true
-                }
-            ]);
-            if (goBack) {
-                await this.run();
-            }
-            return;
-        }
-
-        allFiles.forEach(file => {
-            const willOverwrite = filesToOverwrite.includes(file);
-            const icon = willOverwrite ? chalk.red('🔄 OVERWRITE') : chalk.green('📝 CREATE');
-            console.log(`  ${icon} .agent-os/standards/${file}`);
-        });
-
-        console.log(chalk.gray(`\nCoding Standard: ${chalk.white.bold(standardDetails.name)}`));
-        console.log(chalk.gray(`Total files: ${allFiles.length}`));
-
-        const { confirm } = await inquirer.prompt([
-            {
-                type: 'confirm',
-                name: 'confirm',
-                message: 'Do you want to proceed with downloading the coding standards?',
-                default: false
-            }
-        ]);
-
-        if (!confirm) {
-            console.log(chalk.yellow('Operation cancelled.\n'));
-            // Go back to main menu
-            const { goBack } = await inquirer.prompt([
-                {
-                    type: 'confirm',
-                    name: 'goBack',
-                    message: 'Go back to main menu?',
-                    default: true
-                }
-            ]);
-            if (goBack) {
-                await this.run();
-            }
-        }
-
-        // Step 6: Create directories and write files
-        console.log(chalk.blue('📁 Creating directories...'));
-
-        try {
-            // Create directories if they don't exist
-            if (!fs.existsSync(standardsDir)) {
-                fs.mkdirSync(standardsDir, { recursive: true });
-            }
-            if (!fs.existsSync(codeStyleDir)) {
-                fs.mkdirSync(codeStyleDir, { recursive: true });
-            }
-
-            console.log(chalk.green('✅ Directories created\n'));
-
-            // Step 7: Clear contents from code-style directory
-            console.log(chalk.blue('🧹 Clearing contents from .agent-os/standards/code-style...'));
-
-            try {
-                if (fs.existsSync(codeStyleDir)) {
-                    const files = fs.readdirSync(codeStyleDir);
-                    for (const file of files) {
-                        const filePath = path.join(codeStyleDir, file);
-                        if (fs.statSync(filePath).isFile()) {
-                            fs.unlinkSync(filePath);
-                        }
-                    }
-                    console.log(chalk.green('✅ Code-style directory cleared\n'));
-                } else {
-                    console.log(chalk.yellow('⚠️ Code-style directory not found, skipping clear operation\n'));
-                }
-            } catch (error) {
-                console.log(chalk.red('❌ Failed to clear code-style directory:'), error.message);
-            }
-
-            // Step 8: Write main content files
-            console.log(chalk.blue('📝 Writing standard files...'));
-
-            const writeFile = (filePath, content, description) => {
-                // Skip writing if content is empty or only whitespace
-                if (!content || content.trim() === '') {
-                    console.log(chalk.yellow(`  ⚠️ Skipping ${description} - no content available`));
-                    return;
-                }
-                fs.writeFileSync(filePath, content);
-                console.log(chalk.green(`  ✅ ${description}`));
-            };
-
-            writeFile(bestPracticesPath, standardDetails.best_practices?.length > 2 ? standardDetails.best_practices : "No best practices defined.", 'best-practices.md');
-            writeFile(codeStylePath, standardDetails.code_style?.length > 2 ? standardDetails.code_style : "No code styles defined.", 'code-style.md');
-            writeFile(techStackPath, standardDetails.tech_stack?.length > 2 ? standardDetails.tech_stack : "No tech stack defined.", 'tech-stack.md');
-
-            console.log(chalk.green.bold('\n🎉 Coding standards setup complete!'));
-            console.log(chalk.gray('Your Agent OS environment now has the following structure:'));
-            console.log(chalk.cyan(`
-📂 .agent-os/standards/
-├── 📄 best-practices.md
-├── 📄 code-style.md
-└── 📄 tech-stack.md
-            `));
-
-            console.log(chalk.blue('💡 These files will help AI assistants understand your coding standards and best practices.\n'));
-
-        } catch (error) {
-            console.error(chalk.red('❌ Failed to write files:'), error.message);
-            return;
-        }
-
-        // Return to main menu
-        const { goBack } = await inquirer.prompt([
-            {
-                type: 'confirm',
-                name: 'goBack',
-                message: 'Go back to main menu?',
-                default: true
-            }
-        ]);
-
-        if (goBack) {
-            await this.run();
         }
     }
 
