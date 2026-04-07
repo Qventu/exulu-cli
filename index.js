@@ -20,7 +20,6 @@ const tips = [
     "Customize your PR review prompt via `claude-code-review.yml` — e.g. tell Claude to *only* report bugs or security issues, and keep it concise.",
     "Set up **terminal mode properly** (e.g. `/terminal-setup`) so that Shift+Enter and input behavior work as expected.",
     "Remember: **Escape** stops the current run; pressing Escape twice shows a list of past messages you can navigate back to.",
-    "Define and use **hooks** (e.g. PreToolUse, PostToolUse) and custom slash commands to integrate Claude into your dev workflow.",
     "Feed console/terminal errors, log traces, or screenshots directly into Claude rather than translating them yourself. It helps it debug more precisely.",
     "Favor **small diffs** over sprawling edits — it makes review easier and reduces risk of unintended changes.",
     "Prompt Claude to write tests first (TDD style) then implement code to satisfy those tests.",
