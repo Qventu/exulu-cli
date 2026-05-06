@@ -7,10 +7,14 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const inquirer = require('inquirer');
+const autocompletePrompt = require('inquirer-autocomplete-prompt');
 const chalk = require('chalk');
 const https = require('https');
 const http = require('http');
-const { gql, GraphQLClient } = require('graphql-request')
+const { gql, GraphQLClient } = require('graphql-request');
+
+// Register autocomplete prompt
+inquirer.registerPrompt('autocomplete', autocompletePrompt)
 
 const tips = [
     "Install the **Claude Code extension** in your IDE so Claude Code can recognize your current open file, and selected code.",
@@ -120,6 +124,108 @@ Intelligence Management Platform \n\n`));
         }
     }
 
+    async selectFromPaginatedList(client, queryName, itemType, filters = {}, additionalChoices = []) {
+        let page = 1;
+        const limit = 10;
+        let selectedItem = null;
+
+        // Create a function to fetch items based on search input
+        const fetchItems = async (searchTerm = '') => {
+            const mergedFilters = { ...filters };
+
+            if (searchTerm && searchTerm.trim()) {
+                mergedFilters.name = { contains: searchTerm.trim() };
+            }
+
+            const filterString = Object.keys(mergedFilters).length > 0
+                ? `, filters: ${JSON.stringify(mergedFilters).replace(/"([^"]+)":/g, '$1:')}`
+                : '';
+
+            const document = gql`
+                {
+                    ${queryName}(page: ${page}, limit: ${limit}${filterString}) {
+                        items {
+                            id
+                            name
+                            description
+                        }
+                        pageInfo {
+                            pageCount
+                            itemCount
+                            currentPage
+                            hasPreviousPage
+                            hasNextPage
+                        }
+                    }
+                }
+            `;
+
+            try {
+                const response = await client.request(document);
+                const data = response[queryName];
+                return data;
+            } catch (error) {
+                console.error(chalk.red('Error fetching items:'), error.message);
+                return { items: [], pageInfo: { pageCount: 1, itemCount: 0 } };
+            }
+        };
+
+        while (!selectedItem) {
+            const searchSource = async (answersSoFar, input) => {
+                const data = await fetchItems(input);
+                const items = data.items;
+                const totalPages = data.pageInfo.pageCount || 1;
+                const hasNextPage = data.pageInfo.hasNextPage;
+                const hasPreviousPage = data.pageInfo.hasPreviousPage;
+                const choices = [
+                    ...items.map(item => {
+                        const name = `${item.name}${item.description ? ` - ${item.description.slice(0, 60)}` : ''}`;
+                        const short = name.slice(0, 30) + (name.length > 30 ? '...' : '');
+                        return {
+                            name: short,
+                            value: item.id,
+                        }
+                    }),
+                    ...additionalChoices
+                ];
+
+                // Add navigation options
+                if (choices.length > 0) {
+                    choices.push(new inquirer.Separator());
+                }
+
+                if (hasPreviousPage) {
+                    choices.push({ name: '⬅️  Previous page', value: '__PREV__' });
+                }
+                if (hasNextPage) {
+                    choices.push({ name: '➡️  Next page', value: '__NEXT__' });
+                }
+
+                return choices;
+            };
+
+            const { selection } = await inquirer.prompt([
+                {
+                    type: 'autocomplete',
+                    name: 'selection',
+                    message: `Search and select a ${itemType.toLowerCase().replace(/s$/, '')} (page ${page}):`,
+                    source: searchSource,
+                    pageSize: 15
+                }
+            ]);
+
+            if (selection === '__PREV__') {
+                page--;
+            } else if (selection === '__NEXT__') {
+                page++;
+            } else {
+                selectedItem = selection;
+            }
+        }
+
+        return selectedItem;
+    }
+
     async selectClaudeCodeIMPAgent() {
         const claudeDir = path.dirname(this.claudeSettingsPath);
 
@@ -144,97 +250,49 @@ Intelligence Management Platform \n\n`));
         const urlObj = new URL(settings.env.ANTHROPIC_BASE_URL);
         const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
 
-        const document = gql`
-            {
-                agentsPagination(page: 1, limit: 30, filters: {
-                    category: {
-                        eq: "coding"
-                    }
-                }) {
-                    items {
-                        id
-                        name
-                        description
-                    }
-                }
-            }
-        `
+        console.log("[EXULU] Base URL: " + baseUrl);
+        console.log("[EXULU] Token: " + token);
+
         const client = new GraphQLClient(`${baseUrl}/graphql`, {
             headers: {
                 Authorization: `Bearer ${token}`,
             },
         });
-        const response = await client.request(document);
 
-        console.log("response", response)
+        // Select agent with pagination and search
+        const agent = await this.selectFromPaginatedList(
+            client,
+            'agentsPagination',
+            'Agents',
+            { category: { eq: 'coding' } }
+        );
 
-        const agents = await response.agentsPagination.items;
-
-        console.log(chalk.blue('✅ Agents:'));
-        console.table(agents.map(agent => ({
-            id: agent.id?.slice(0, 8) + '...',
-            name: agent.name,
-            description: agent.description?.slice(0, 40) + '...',
-        })));
-        console.log(chalk.gray('Total agents: ' + agents.length));
-
-        const { agent } = await inquirer.prompt([
+        // Get agent details for MCP config
+        const agentDocument = gql`
             {
-                type: 'list',
-                name: 'agent',
-                message: 'Select an agent:',
-                choices: agents.map(agent => ({
-                    name: agent.name,
-                    value: agent.id
-                }))
-            }
-        ]);
-
-        // Now get projects for project selection
-        const projectDocument = gql`
-            {
-                projectsPagination(limit: 10, page: 1) {
-                    items {
-                        id
-                        name
-                        description
-                        createdAt
-                        updatedAt
-                    }
+                agentById(id: "${agent}") {
+                    id
+                    name
+                    description
                 }
             }
-        `
-        const projectResponse = await client.request(projectDocument);
-        const projects = projectResponse.projectsPagination.items;
+        `;
+        const agentResponse = await client.request(agentDocument);
+        const selectedAgent = agentResponse.agentById;
 
-        console.log(chalk.blue('✅ Projects:'));
-        console.table(projects.map(project => ({
-            id: project.id?.slice(0, 8) + '...',
-            name: project.name,
-            description: project.description?.slice(0, 40) + '...',
-        })));
-        console.log(chalk.gray('Total projects: ' + projects.length));
-
-        const { project } = await inquirer.prompt([
-            {
-                type: 'list',
-                name: 'project',
-                message: 'Select a project:',
-                choices: [
-                    ...projects.map(project => ({
-                        name: project.name,
-                        value: project.id
-                    })),
-                    { name: 'No project', value: 'DEFAULT' }
-                ]
-            }
-        ]);
+        // Select project with pagination and search
+        const project = await this.selectFromPaginatedList(
+            client,
+            'projectsPagination',
+            'Projects',
+            {},
+            [{ name: 'No project', value: 'DEFAULT' }]
+        );
 
         settings.env.ANTHROPIC_BASE_URL = `${baseUrl}/gateway/anthropic/${agent}/${project}`;
         fs.writeFileSync(this.claudeSettingsPath, JSON.stringify(settings, null, 4));
 
-        // Get agent details to create MCP config
-        const selectedAgent = agents.find(a => a.id === agent);
+        // Create MCP config
         await this.updateMcpConfig(baseUrl, agent, selectedAgent.name);
 
         console.log(chalk.green(`✅ Agent ${agent} and project ${project} selected\n`));
@@ -649,6 +707,7 @@ Intelligence Management Platform \n\n`));
                 }
             }
         }
+        console.log("[EXULU] Backend: " + backend);
         `
         const client = new GraphQLClient(`${backend}/graphql`, {
             headers: {
